@@ -15,6 +15,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		ErrorLogger::Log(E_INVALIDARG, "Test Message");
 	}*/
 
+	HRESULT hr = CoInitialize(NULL);
+	if (FAILED(hr)) {
+		ErrorLogger::Log(hr, "Failed to call CoInitialize.");
+		return -1;
+	}
+
 	Engine engine;
 	engine.Initialize(hInstance, "title", "class", 800, 600);
 	while (engine.ProcessMessage() == true) {

@@ -9,16 +9,27 @@ bool RenderWindow::Initialize(WindowContainer * pWindowContainer, HINSTANCE hIns
 	this->window_class = window_class;
 	this->window_class_wide = StringConverter::StringToWide(this->window_class);
 
+	//윈도우 창 크기는 위의 타이틀 바까지 포함해서 생성됨. 즉 타이틀 바를 제외한 크기의 윈도우 생성.
 	this->RegisterWindowClass();
+
+	int centerScreenX = GetSystemMetrics(SM_CXSCREEN) / 2 - this->width / 2;
+	int centerScreenY = GetSystemMetrics(SM_CYSCREEN) / 2 - this->height / 2;
+
+	RECT wr; // Window rectangle
+	wr.left = centerScreenX;
+	wr.top = centerScreenY;
+	wr.right = wr.left + this->width;
+	wr.bottom = wr.top + this->height;
+	AdjustWindowRect(&wr, WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, FALSE); // 윈도우 크기 조정
 
 	this->handle = CreateWindowEx(0, //Extended Window style -> 0은 디폴트
 		this->window_class_wide.c_str(), //클래스 이름
 		this->window_title_wide.c_str(), //타이틀 이름
 		WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU, //윈도우 스타일
-		0, //윈도우 x 위치
-		0, //윈도우 y 위치
-		this->width, //창 너비
-		this->height, //창 높이
+		wr.left, //윈도우 x 위치
+		wr.top, //윈도우 y 위치
+		wr.right - wr.left, //창 너비
+		wr.bottom - wr.top, //창 높이
 		NULL, //윈도우 parent, 현재 parent window 없음
 		NULL, //chile window 혹은 menu, 현재 child window 없음
 		this->hInstance,//윈도우 instance
