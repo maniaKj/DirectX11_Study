@@ -1,7 +1,9 @@
 #include "Graphics.h"
 
 bool Graphics::Initialize(HWND hwnd, int width, int height) {
-	if (!InitializeDirectX(hwnd, width, height))
+	this->windowWidth = width;
+	this->windowHeight = height;
+	if (!InitializeDirectX(hwnd))
 		return false;
 
 	if (!InitializeShaders())
@@ -27,12 +29,22 @@ void Graphics::RenderFrame()
 	this->deviceContext->VSSetShader(vertexshader.GetShader(), NULL, 0);
 	this->deviceContext->PSSetShader(pixelshader.GetShader(), NULL, 0);
 
-	UINT stride = sizeof(Vertex);
 	UINT offset = 0;
+
+	//update constant buffer
+	DirectX::XMMATRIX world = DirectX::XMMatrixIdentity();
+	camera.AdjustPosition(0.01f, 0.00f, 0.0f);
+	camera.SetLookAtPos(XMFLOAT3(0.0f, 0.0f, 0.0f));
+	constantBuffer.data.mat = world * camera.GetViewMatrix() * camera.GetProjectionMatrix(); //전역 좌표계 * 뷰 행렬 * 투영 행렬
+	constantBuffer.data.mat = DirectX::XMMatrixTranspose(constantBuffer.data.mat); // 다이렉트 x와 hlsl이 행렬을 다루는 방식이 달라서 변환 적용(hlsl-Column major)
+	if (!constantBuffer.ApplyChanges()) return;
+	this->deviceContext->VSSetConstantBuffers(0, 1, this->constantBuffer.GetAddressOf());
+
 	//사각형
 	this->deviceContext->PSSetShaderResources(0, 1, this->myTexture.GetAddressOf());
-	this->deviceContext->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
-	this->deviceContext->Draw(6, 0);
+	this->deviceContext->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), vertexBuffer.StridePtr(), &offset);
+	this->deviceContext->IASetIndexBuffer(indicesBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+	this->deviceContext->DrawIndexed(indicesBuffer.BufferSize(), 0, 0);
 
 	//Draw text
 	spriteBatch->Begin();
@@ -42,20 +54,21 @@ void Graphics::RenderFrame()
 	this->swapchain->Present(1, NULL);
 }
 
-bool Graphics::InitializeDirectX(HWND hwnd, int width, int height) {
-	//HRESULT hr = D3D11CreateDeviceAndSwapChain() //Creates a device that represents the display adapter and a swap chain used for rendering.
+bool Graphics::InitializeDirectX(HWND hwnd)
+{
 	std::vector<AdapterData> adapters = AdapterReader::GetAdapters();
 
-	if (adapters.size() < 1) {
-		ErrorLogger::Log("No DXGI Adapters found.");
+	if (adapters.size() < 1)
+	{
+		ErrorLogger::Log("No IDXGI Adapters found.");
 		return false;
 	}
 
 	DXGI_SWAP_CHAIN_DESC scd;
 	ZeroMemory(&scd, sizeof(DXGI_SWAP_CHAIN_DESC));
 
-	scd.BufferDesc.Width = width;
-	scd.BufferDesc.Height = height;
+	scd.BufferDesc.Width = this->windowWidth;
+	scd.BufferDesc.Height = this->windowHeight;
 	scd.BufferDesc.RefreshRate.Numerator = 60;
 	scd.BufferDesc.RefreshRate.Denominator = 1;
 	scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -73,41 +86,44 @@ bool Graphics::InitializeDirectX(HWND hwnd, int width, int height) {
 	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
 	HRESULT hr;
-	hr = D3D11CreateDeviceAndSwapChain(adapters[0].pAdapter,//IDXGI Adapters
-		D3D_DRIVER_TYPE_UNKNOWN,
-		NULL, //FOR SOFTWARE DRIVER TYPE
-		NULL, //FLAGS FOR RUNTIME LAYERS
-		NULL, //FEATURE LEVELS ARRAY
-		0, //#OF FEATURE LEVEL in ARRAY
-		D3D11_SDK_VERSION,
-		&scd,//Swapchain description
-		this->swapchain.GetAddressOf(),
-		this->device.GetAddressOf(),
-		NULL, //Supported Feature level
-		this->deviceContext.GetAddressOf()); //device context
+	hr = D3D11CreateDeviceAndSwapChain(	adapters[0].pAdapter, //IDXGI Adapter
+										D3D_DRIVER_TYPE_UNKNOWN,
+										NULL, //FOR SOFTWARE DRIVER TYPE
+										NULL, //FLAGS FOR RUNTIME LAYERS
+										NULL, //FEATURE LEVELS ARRAY
+										0, //# OF FEATURE LEVELS IN ARRAY
+										D3D11_SDK_VERSION,
+										&scd, //Swapchain description
+										this->swapchain.GetAddressOf(), //Swapchain Address
+										this->device.GetAddressOf(), //Device Address
+										NULL, //Supported feature level
+										this->deviceContext.GetAddressOf()); //Device Context Address
 
-	if (FAILED(hr)) {
+	if (FAILED(hr))
+	{
 		ErrorLogger::Log(hr, "Failed to create device and swapchain.");
 		return false;
 	}
 
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
 	hr = this->swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backBuffer.GetAddressOf()));
-	if (FAILED(hr)) {
+	if (FAILED(hr)) //If error occurred
+	{
 		ErrorLogger::Log(hr, "GetBuffer Failed.");
 		return false;
 	}
 
 	hr = this->device->CreateRenderTargetView(backBuffer.Get(), NULL, this->renderTargetView.GetAddressOf());
-	if (FAILED(hr)) {
-		ErrorLogger::Log(hr, "Failed to Create render target view.");
+	if (FAILED(hr)) //If error occurred
+	{
+		ErrorLogger::Log(hr, "Failed to create render target view.");
 		return false;
 	}
 
-	//Describe out depth/stencil buffer
+	//Describe our Depth/Stencil Buffer
 	D3D11_TEXTURE2D_DESC depthStencilDesc;
-	depthStencilDesc.Width = width;
-	depthStencilDesc.Height = height;
+	depthStencilDesc.Width = this->windowWidth;
+	depthStencilDesc.Height = this->windowHeight;
 	depthStencilDesc.MipLevels = 1;
 	depthStencilDesc.ArraySize = 1;
 	depthStencilDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
@@ -119,20 +135,22 @@ bool Graphics::InitializeDirectX(HWND hwnd, int width, int height) {
 	depthStencilDesc.MiscFlags = 0;
 
 	hr = this->device->CreateTexture2D(&depthStencilDesc, NULL, this->depthStencilBuffer.GetAddressOf());
-	if (FAILED(hr)) {
+	if (FAILED(hr)) //If error occurred
+	{
 		ErrorLogger::Log(hr, "Failed to create depth stencil buffer.");
 		return false;
 	}
 
 	hr = this->device->CreateDepthStencilView(this->depthStencilBuffer.Get(), NULL, this->depthStencilView.GetAddressOf());
-	if (FAILED(hr)) {
+	if (FAILED(hr)) //If error occurred
+	{
 		ErrorLogger::Log(hr, "Failed to create depth stencil view.");
 		return false;
 	}
 
 	this->deviceContext->OMSetRenderTargets(1, this->renderTargetView.GetAddressOf(), this->depthStencilView.Get());
 
-	//depth stencil state 생성
+	//Create depth stencil state 스텐실 & 뎁스
 	D3D11_DEPTH_STENCIL_DESC depthstencildesc;
 	ZeroMemory(&depthstencildesc, sizeof(D3D11_DEPTH_STENCIL_DESC));
 
@@ -141,32 +159,35 @@ bool Graphics::InitializeDirectX(HWND hwnd, int width, int height) {
 	depthstencildesc.DepthFunc = D3D11_COMPARISON_FUNC::D3D11_COMPARISON_LESS_EQUAL;
 
 	hr = this->device->CreateDepthStencilState(&depthstencildesc, this->depthStencilState.GetAddressOf());
-	if (FAILED(hr)) {
+	if (FAILED(hr))
+	{
 		ErrorLogger::Log(hr, "Failed to create depth stencil state.");
 		return false;
 	}
-	//뷰포트 생성
+
+	//뷰포트 만들기
 	D3D11_VIEWPORT viewport;
 	ZeroMemory(&viewport, sizeof(D3D11_VIEWPORT));
 
 	viewport.TopLeftX = 0;
 	viewport.TopLeftY = 0;
-	viewport.Width = static_cast<float>(width);
-	viewport.Height = static_cast<float>(height);
+	viewport.Width = this->windowWidth;
+	viewport.Height = this->windowHeight;
 	viewport.MinDepth = 0.0f;
 	viewport.MaxDepth = 1.0f;
 
 	//뷰포트 설정
 	this->deviceContext->RSSetViewports(1, &viewport);
 
-	//래스터라이저 단계 생성
+	//래스터라이저 state 설정
 	D3D11_RASTERIZER_DESC rasterizerDesc;
 	ZeroMemory(&rasterizerDesc, sizeof(D3D11_RASTERIZER_DESC));
 
 	rasterizerDesc.FillMode = D3D11_FILL_MODE::D3D11_FILL_SOLID;
 	rasterizerDesc.CullMode = D3D11_CULL_MODE::D3D11_CULL_BACK;
 	hr = this->device->CreateRasterizerState(&rasterizerDesc, this->rasterizerState.GetAddressOf());
-	if (hr != S_OK) {
+	if (FAILED(hr))
+	{
 		ErrorLogger::Log(hr, "Failed to create rasterizer state.");
 		return false;
 	}
@@ -184,8 +205,9 @@ bool Graphics::InitializeDirectX(HWND hwnd, int width, int height) {
 	sampDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
 	sampDesc.MinLOD = 0;
 	sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
-	hr = this->device->CreateSamplerState(&sampDesc, this->samplerState.GetAddressOf());
-	if (FAILED(hr)) {
+	hr = this->device->CreateSamplerState(&sampDesc, this->samplerState.GetAddressOf()); //Create sampler state
+	if (FAILED(hr))
+	{
 		ErrorLogger::Log(hr, "Failed to create sampler state.");
 		return false;
 	}
@@ -197,7 +219,7 @@ bool Graphics::InitializeShaders()
 {
 	std::wstring shaderfolder = L"";
 #pragma region DetermineShaderPath
-	if (IsDebuggerPresent() != TRUE) {
+
 #ifdef _DEBUG //Debug Mode
 #ifdef _WIN64 //x64
 		shaderfolder = L"..\\x64\\Debug\\";
@@ -211,7 +233,7 @@ bool Graphics::InitializeShaders()
 		shaderfolder = L"..\\Release\\";
 #endif
 #endif
-	}
+
 
 	D3D11_INPUT_ELEMENT_DESC layout[] = {
 		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_CLASSIFICATION::D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -236,33 +258,31 @@ bool Graphics::InitializeScene()
 {
 	//Triangle 버텍스 -> 시계방향으로 설정해야 함(기본 환경)
 	Vertex v[] = {
-		Vertex(-0.5f, -0.5f, 1.0f, 0.0f, 1.0f), //Bottom left
-		Vertex(-0.5f, 0.5f, 1.0f, 0.0f, 0.0f), //Top left
-		Vertex(0.5f, 0.5f, 1.0f, 1.0f, 0.0f), //Top Right
-
-		Vertex(-0.5f, -0.5f, 1.0f, 0.0f, 1.0f), //Bottom Left
-		Vertex(0.5f, 0.5f, 1.0f, 1.0f, 0.0f), //Top Right
-		Vertex(0.5f, -0.5f, 1.0f, 1.0f, 1.0f),//Bottom Right
+		Vertex(-0.5f, -0.5f, 0.0f, 0.0f, 1.0f),		//Bottom left	- [0]
+		Vertex(-0.5f, 0.5f, 0.0f, 0.0f, 0.0f),		//Top left		- [1]
+		Vertex(0.5f, 0.5f, 0.0f, 1.0f, 0.0f),		//Top Right		- [2]
+		Vertex(0.5f, -0.5f, 0.0f, 1.0f, 1.0f),		//Bottom Right	- [3]
 	};
 
-	D3D11_BUFFER_DESC vertexBufferDesc;
-	ZeroMemory(&vertexBufferDesc, sizeof(vertexBufferDesc));
-
-	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-	vertexBufferDesc.ByteWidth = sizeof(Vertex) * ARRAYSIZE(v);
-	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	vertexBufferDesc.CPUAccessFlags = 0;
-	vertexBufferDesc.MiscFlags = 0;
-
-	D3D11_SUBRESOURCE_DATA vertexBufferData;
-	ZeroMemory(&vertexBufferData, sizeof(vertexBufferData));
-	vertexBufferData.pSysMem = v;
-
-	HRESULT hr = this->device->CreateBuffer(&vertexBufferDesc, &vertexBufferData, this->vertexBuffer.GetAddressOf());
+	//버텍스 데이터 로드
+	HRESULT hr = this->vertexBuffer.Initialize(this->device.Get(), v, ARRAYSIZE(v));
 	if (FAILED(hr)) {
 		ErrorLogger::Log(hr, "Failed to create vertex Buffer.");
 		return false;
 	}
+
+	DWORD indices[] = {
+		0, 1, 2,
+		0, 2, 3
+	};
+
+	//Index Data 불러오기
+	hr = this->indicesBuffer.Initialize(this->device.Get(), indices, ARRAYSIZE(indices));
+	if (FAILED(hr)) {
+		ErrorLogger::Log(hr, "Failed to create Indices Buffer.");
+		return hr;
+	}
+
 
 	//텍스쳐 불러오기
 	hr = DirectX::CreateWICTextureFromFile(this->device.Get(), L"Data\\Textures\\test.png", nullptr, myTexture.GetAddressOf());
@@ -270,6 +290,16 @@ bool Graphics::InitializeScene()
 		ErrorLogger::Log(hr, "Failed to create wic texture from file.");
 		return false;
 	}
+
+	//Initialize Constant buffer(s)
+	hr = this->constantBuffer.Initialize(this->device.Get(), this->deviceContext.Get());
+	if (FAILED(hr)) {
+		ErrorLogger::Log(hr, "Failed to Initialize constant buffer.");
+		return false;
+	}
+
+	camera.SetPosition(0.0f, 0.0f, -2.0f);
+	camera.SetProjectionValues(90.0f, static_cast<float>(windowWidth) / static_cast<float>(windowHeight), 0.1f, 1000.0f);
 
 	return false;
 }
