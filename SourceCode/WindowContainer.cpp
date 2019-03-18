@@ -1,8 +1,31 @@
 #include "WindowContainer.h"
 
+WindowContainer::WindowContainer() {
+	static bool raw_input_initialized = false;
+	if (raw_input_initialized == false) {
+
+		RAWINPUTDEVICE rid;
+
+		rid.usUsagePage = 0x01;
+		rid.usUsage = 0x02;
+		rid.dwFlags = 0;
+		rid.hwndTarget = NULL;
+
+		if (RegisterRawInputDevices(&rid, 1, sizeof(rid)) == FALSE) {
+			ErrorLogger::Log(GetLastError(), "Failed to register raw input devices.");
+			exit(-1);
+		}
+		raw_input_initialized = true;
+	}
+}
+
+//ImGui 함수 가져오기 -> win32 연계
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT WindowContainer::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam)) return false;
+
 	switch (uMsg) {
-	//keyboard message
+		//keyboard message
 	case WM_KEYDOWN: {
 		unsigned char keycode = static_cast<unsigned char>(wParam);
 		if (keyboard.IsKeysAutoRepeat()) {
@@ -34,7 +57,7 @@ LRESULT WindowContainer::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 		}
 		return 0;
 	}
-	//Mouse Message
+				  //Mouse Message
 	case WM_MOUSEMOVE: {
 		int x = LOWORD(lParam);
 		int y = HIWORD(lParam);
@@ -95,24 +118,5 @@ LRESULT WindowContainer::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 	}
 	default:
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
-	}
-}
-
-WindowContainer::WindowContainer() {
-	static bool raw_input_initialized = false;
-	if (raw_input_initialized == false) {
-
-		RAWINPUTDEVICE rid;
-
-		rid.usUsagePage = 0x01;
-		rid.usUsage = 0x02;
-		rid.dwFlags = 0;
-		rid.hwndTarget = NULL;
-
-		if (RegisterRawInputDevices(&rid, 1, sizeof(rid)) == FALSE) {
-			ErrorLogger::Log(GetLastError(), "Failed to register raw input devices.");
-			exit(-1);
-		}
-		raw_input_initialized = true;
 	}
 }

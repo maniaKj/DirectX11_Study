@@ -21,6 +21,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		return -1;
 	}
 
+	COMException exception(0, "TEST MESSAGE", __FILE__, __FUNCTION__, __LINE__);
+	ErrorLogger::Log(exception);
+
 	Engine engine;
 	engine.Initialize(hInstance, "title", "class", 800, 600);
 	while (engine.ProcessMessage() == true) {
