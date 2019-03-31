@@ -5,9 +5,9 @@ bool RenderWindow::Initialize(WindowContainer * pWindowContainer, HINSTANCE hIns
 	this->width = width;
 	this->height = height;
 	this->window_title = window_title;
-	this->window_title_wide = StringConverter::StringToWide(this->window_title);
+	this->window_title_wide = StringHelper::StringToWide(this->window_title);
 	this->window_class = window_class;
-	this->window_class_wide = StringConverter::StringToWide(this->window_class);
+	this->window_class_wide = StringHelper::StringToWide(this->window_class);
 
 	//윈도우 창 크기는 위의 타이틀 바까지 포함해서 생성됨. 즉 타이틀 바를 제외한 크기의 윈도우 생성.
 	this->RegisterWindowClass();
